@@ -1,7 +1,7 @@
 use eframe::epaint::{CircleShape, RectShape};
 use egui::{
-    Align2, Color32, Context, FontId, PointerButton, Pos2, Rect, Rounding, Shape, SidePanel,
-    Stroke, Vec2, Window,
+    Color32, Context, PointerButton, Pos2, Rect, Rounding, Shape, SidePanel, Stroke, TextEdit,
+    TextStyle, Vec2, Window,
 };
 
 use crate::game::{Grid, Player, Turn};
@@ -9,16 +9,21 @@ use crate::game::{Grid, Player, Turn};
 const BOX_SIZE: f32 = 60.0;
 const GRID_SIZE: f32 = 3.0 * BOX_SIZE;
 
+#[derive(Default)]
+struct UiState {
+    notation_textbox_content: String,
+}
+
 pub struct App {
     board: Grid,
-    turn: u32,
+    state: UiState,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
             board: Grid::default(),
-            turn: 1,
+            state: UiState::default(),
         }
     }
 }
@@ -41,6 +46,19 @@ impl eframe::App for App {
 
         SidePanel::right("notation").show(ctx, |ui| {
             ui.heading("Game");
+            ui.add(
+                TextEdit::multiline(&mut self.state.notation_textbox_content)
+                    .font(TextStyle::Monospace),
+            );
+            if ui.button("Replay game from notation").clicked()
+                && !self.state.notation_textbox_content.is_empty()
+            {
+                self.board = Grid::default();
+                for turn in self.state.notation_textbox_content.split('\n') {
+                    let turn: Turn = turn.try_into().unwrap();
+                    self.board.apply_turn(turn.coords).unwrap(); // XXX: REMOVE UNWRAPS
+                }
+            }
             // New Game
             // <Online stuff?>
             // Current game notation
@@ -86,27 +104,19 @@ impl eframe::App for App {
                                     Vec2::splat(BOX_SIZE),
                                 );
 
-                                let mut color = Color32::TRANSPARENT;
-
-                                if let Some(pos) = pos {
-                                    if rect.contains(pos) {
-                                        color = Color32::from_rgba_unmultiplied(255, 255, 255, 15);
-                                    }
-                                }
+                                let color = if valid_boxes.contains(&(outer_coords, inner_coords)) {
+                                    Color32::from_rgba_unmultiplied(10, 255, 100, 40)
+                                } else {
+                                    Color32::TRANSPARENT
+                                };
 
                                 if let Some(pos) = interact_pos {
                                     if rect.contains(pos) {
-                                        let res = self.board.apply_turn(&Turn::new(
-                                            self.turn,
-                                            if self.turn % 2 == 0 {
-                                                Player::O
-                                            } else {
-                                                Player::X
-                                            },
-                                            (outer_coords, inner_coords),
-                                        ));
-                                        if res.is_ok() {
-                                            self.turn += 1;
+                                        if let Ok(_) =
+                                            self.board.apply_turn((outer_coords, inner_coords))
+                                        {
+                                            self.state.notation_textbox_content =
+                                                self.board.to_string();
                                         }
                                     }
                                 }
@@ -116,17 +126,23 @@ impl eframe::App for App {
                                         rect,
                                         rounding: Rounding::none(),
                                         fill: color,
-                                        stroke: Stroke::new(
-                                            0.5,
-                                            if valid_boxes.contains(&(outer_coords, inner_coords)) {
-                                                Color32::BLUE
-                                            } else {
-                                                Color32::WHITE
-                                            },
-                                        ),
+                                        stroke: Stroke::new(0.5, Color32::WHITE),
                                     }
                                     .into(),
                                 );
+
+                                if let Some(pos) = pos {
+                                    if rect.contains(pos) {
+                                        squares.push(
+                                            RectShape::filled(
+                                                rect,
+                                                Rounding::none(),
+                                                Color32::from_rgba_unmultiplied(255, 255, 255, 15),
+                                            )
+                                            .into(),
+                                        );
+                                    }
+                                }
 
                                 if let Some(player) =
                                     self.board.get_box(outer_coords).get_tile(inner_coords)

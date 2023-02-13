@@ -31,20 +31,36 @@ impl TryFrom<&str> for Player {
 // Maybe this isn't great, but the elements are ordered such that they correctly index into a 1D list of 9 elements
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Direction {
-    NW,
-    N,
-    NE,
-    W,
-    C,
-    E,
-    SW,
-    S,
-    SE,
+    NW = 0,
+    N = 1,
+    NE = 2,
+    W = 3,
+    C = 4,
+    E = 5,
+    SW = 6,
+    S = 7,
+    SE = 8,
 }
 
 impl Direction {
     pub fn index(&self) -> usize {
         *self as usize
+    }
+}
+
+impl ToString for Direction {
+    fn to_string(&self) -> String {
+        match self {
+            Direction::NW => String::from("NW"),
+            Direction::N => String::from("N"),
+            Direction::NE => String::from("NE"),
+            Direction::W => String::from("W"),
+            Direction::C => String::from("C"),
+            Direction::E => String::from("E"),
+            Direction::SW => String::from("SW"),
+            Direction::S => String::from("S"),
+            Direction::SE => String::from("SE"),
+        }
     }
 }
 
@@ -87,26 +103,43 @@ impl TryFrom<u32> for Direction {
 impl TryFrom<(u32, u32)> for Direction {
     type Error = UT3Error;
     fn try_from(coords: (u32, u32)) -> Result<Self, Self::Error> {
-        match (3 * coords.0 + coords.1).try_into() {
+        match (3 * coords.1 + coords.0).try_into() {
             Ok(d) => Ok(d),
             Err(_) => Err(UT3Error::InvalidDirection(format!("{coords:?}"))),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct Turn {
     pub turn_number: u32,
-    pub player: Player,
+    player: Player,
     pub coords: (Direction, Direction),
 }
 
 impl Turn {
-    pub fn new(turn_number: u32, player: Player, coords: (Direction, Direction)) -> Self {
+    pub fn new(turn_number: u32, coords: (Direction, Direction)) -> Self {
         Self {
             turn_number,
-            player,
+            player: if turn_number % 2 == 0 {
+                Player::O
+            } else {
+                Player::X
+            },
             coords,
         }
+    }
+}
+
+impl ToString for Turn {
+    fn to_string(&self) -> String {
+        format!(
+            "{}\t{}\t{}/{}",
+            self.turn_number,
+            self.player.to_string(),
+            self.coords.0.to_string(),
+            self.coords.1.to_string()
+        )
     }
 }
 
@@ -115,17 +148,12 @@ impl TryFrom<&str> for Turn {
     fn try_from(string: &str) -> Result<Self, Self::Error> {
         let parts = string.split_ascii_whitespace().collect::<Vec<&str>>();
         let turn_number = parts[0].parse()?;
-        let player = parts[1].try_into()?;
         let coords = {
             let coords = parts[2].split("/").collect::<Vec<&str>>();
             (coords[0].try_into()?, coords[1].try_into()?)
         };
 
-        Ok(Self {
-            turn_number,
-            player,
-            coords,
-        })
+        Ok(Self::new(turn_number, coords))
     }
 }
 
@@ -184,38 +212,41 @@ impl Default for Box {
 pub struct Grid {
     pub winner: Option<Player>,
     pub track: Option<Direction>,
+    pub current_turn_number: u32,
+    pub turns: Vec<Turn>,
     inner: [Box; 9],
 }
 
 impl Grid {
-    pub fn apply_turn(&mut self, turn: &Turn) -> Result<(), UT3Error> {
-        if self.track.is_some() && turn.coords.0 != self.track.unwrap() {
+    pub fn apply_turn(&mut self, coords: (Direction, Direction)) -> Result<(), UT3Error> {
+        if self.track.is_some() && coords.0 != self.track.unwrap() {
             Err(UT3Error::WrongTrack {
                 required: self.track.unwrap(),
-                got: turn.coords.0,
+                got: coords.0,
             })
-        } else if self
-            .get_box(turn.coords.0)
-            .get_tile(turn.coords.1)
-            .is_some()
-        {
+        } else if self.get_box(coords.0).get_tile(coords.1).is_some() {
             Err(UT3Error::PositionTaken {
-                position: turn.coords,
-                value: self.get_box(turn.coords.0).get_tile(turn.coords.1).unwrap(),
+                position: coords,
+                value: self.get_box(coords.0).get_tile(coords.1).unwrap(),
             })
-        } else if self.box_is_finished(turn.coords.0) {
-            Err(UT3Error::BoxHasWinner(turn.coords.0))
+        } else if self.box_is_finished(coords.0) {
+            Err(UT3Error::BoxHasWinner(coords.0))
         } else {
-            *self.get_box_mut(turn.coords.0).get_tile_mut(turn.coords.1) = Some(turn.player);
+            let turn = Turn::new(self.current_turn_number, coords);
+
+            *self.get_box_mut(coords.0).get_tile_mut(coords.1) = Some(turn.player);
+
+            self.turns.push(turn);
 
             self.update_wins();
 
-            self.track = if self.box_is_finished(turn.coords.1) {
+            self.track = if self.box_is_finished(coords.1) {
                 None
             } else {
-                Some(turn.coords.1)
+                Some(coords.1)
             };
 
+            self.current_turn_number += 1;
             Ok(())
         }
     }
@@ -275,11 +306,23 @@ impl Grid {
     }
 }
 
+impl ToString for Grid {
+    fn to_string(&self) -> String {
+        self.turns
+            .iter()
+            .map(|turn| turn.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 impl Default for Grid {
     fn default() -> Self {
         Self {
             winner: None,
             track: None,
+            current_turn_number: 1,
+            turns: Vec::new(),
             inner: Default::default(), // essentially just [Box::default(); 9], but that would require having Copy on Box, which is probably not good
         }
     }
