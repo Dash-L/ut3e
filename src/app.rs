@@ -4,7 +4,7 @@ use egui::{
     TextStyle, Vec2, Window,
 };
 
-use crate::game::{Grid, Player, Turn};
+use crate::game::{Grid, Player, Turn, Variant};
 
 const BOX_SIZE: f32 = 60.0;
 const GRID_SIZE: f32 = 3.0 * BOX_SIZE;
@@ -22,7 +22,7 @@ pub struct App {
 impl Default for App {
     fn default() -> Self {
         Self {
-            board: Grid::default(),
+            board: Grid::default().with_variant(Variant::Relative),
             state: UiState::default(),
         }
     }
@@ -87,7 +87,7 @@ impl eframe::App for App {
                     )
                 };
 
-                let valid_boxes = self.board.get_valid_boxes(self.board.track);
+                let valid_boxes = self.board.get_valid_boxes(self.board.get_track());
 
                 for ix in 0..3 {
                     for iy in 0..3 {

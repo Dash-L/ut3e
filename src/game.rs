@@ -1,3 +1,5 @@
+use std::ops::Add;
+
 use crate::error::UT3Error;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -45,6 +47,22 @@ pub enum Direction {
 impl Direction {
     pub fn index(&self) -> usize {
         *self as usize
+    }
+}
+
+impl Add<Direction> for Direction {
+    type Output = Direction;
+
+    fn add(self, rhs: Direction) -> Self::Output {
+        let lhs_coords: (u32, u32) = self.into();
+        let rhs_coords: (u32, u32) = rhs.into();
+
+        (
+            (lhs_coords.0 as i32 + rhs_coords.0 as i32 - 1i32).rem_euclid(3) as u32,
+            (lhs_coords.1 as i32 + rhs_coords.1 as i32 - 1i32).rem_euclid(3) as u32,
+        )
+            .try_into()
+            .unwrap()
     }
 }
 
@@ -106,6 +124,22 @@ impl TryFrom<(u32, u32)> for Direction {
         match (3 * coords.1 + coords.0).try_into() {
             Ok(d) => Ok(d),
             Err(_) => Err(UT3Error::InvalidDirection(format!("{coords:?}"))),
+        }
+    }
+}
+
+impl From<Direction> for (u32, u32) {
+    fn from(dir: Direction) -> Self {
+        match dir {
+            Direction::NW => (0, 0),
+            Direction::N => (1, 0),
+            Direction::NE => (2, 0),
+            Direction::W => (0, 1),
+            Direction::C => (1, 1),
+            Direction::E => (2, 1),
+            Direction::SW => (0, 2),
+            Direction::S => (1, 2),
+            Direction::SE => (2, 2),
         }
     }
 }
@@ -208,10 +242,16 @@ impl Default for Box {
     }
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum Variant {
+    Relative,
+    Absolute,
+}
+
 #[derive(Debug)]
 pub struct Grid {
     pub winner: Option<Player>,
-    pub track: Option<Direction>,
+    pub variant: Variant,
     pub current_turn_number: u32,
     pub turns: Vec<Turn>,
     inner: [Box; 9],
@@ -219,9 +259,9 @@ pub struct Grid {
 
 impl Grid {
     pub fn apply_turn(&mut self, coords: (Direction, Direction)) -> Result<(), UT3Error> {
-        if self.track.is_some() && coords.0 != self.track.unwrap() {
+        if self.get_track().is_some() && coords.0 != self.get_track().unwrap() {
             Err(UT3Error::WrongTrack {
-                required: self.track.unwrap(),
+                required: self.get_track().unwrap(),
                 got: coords.0,
             })
         } else if self.get_box(coords.0).get_tile(coords.1).is_some() {
@@ -240,14 +280,25 @@ impl Grid {
 
             self.update_wins();
 
-            self.track = if self.box_is_finished(coords.1) {
-                None
-            } else {
-                Some(coords.1)
-            };
-
             self.current_turn_number += 1;
             Ok(())
+        }
+    }
+
+    pub fn get_track(&self) -> Option<Direction> {
+        if let Some(prev_turn) = self.turns.last() {
+            let absolute_direction = match self.variant {
+                Variant::Relative => prev_turn.coords.0 + prev_turn.coords.1,
+                Variant::Absolute => prev_turn.coords.1,
+            };
+
+            if self.box_is_finished(absolute_direction) {
+                None
+            } else {
+                Some(absolute_direction)
+            }
+        } else {
+            None
         }
     }
 
@@ -304,6 +355,11 @@ impl Grid {
                 .collect::<Vec<Option<Player>>>(),
         );
     }
+
+    pub fn with_variant(mut self, variant: Variant) -> Self {
+        self.variant = variant;
+        self
+    }
 }
 
 impl ToString for Grid {
@@ -320,7 +376,7 @@ impl Default for Grid {
     fn default() -> Self {
         Self {
             winner: None,
-            track: None,
+            variant: Variant::Absolute,
             current_turn_number: 1,
             turns: Vec::new(),
             inner: Default::default(), // essentially just [Box::default(); 9], but that would require having Copy on Box, which is probably not good
